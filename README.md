@@ -23,16 +23,16 @@ Ndef(\sampleSynth).playN([0,1]);
 
 // Load the LearnGUI
 (
-    var config = Dictionary.newFrom(List[
-        \windowTitle, "LearnGUI",
-        \configFileName, "settingsForThisPatch.txt", // Make sure to set as we don't want to overwrite other settings files
-        \title, "LearnGUI Example",
-        \font, Font.defaultSansFace,
-        \fontSize, 16,
-        \backgroundColor, [0.0,0.0,0.0],
-        \foregroundColor, [1,1,1],
-        \activeColor, [0.9,0.9,0.9],
-    ]);
+    var config = (
+        \windowTitle: "LearnGUI",
+        \configFileName: "settingsForThisPatch.txt", // Make sure to set as we don't want to overwrite other settings files
+        \title: "LearnGUI Example",
+        \font: Font.defaultSansFace,
+        \fontSize: 16,
+        \backgroundColor: [0.0,0.0,0.0],
+        \foregroundColor: [1,1,1],
+        \activeColor: [0.9,0.9,0.9],
+    );
 
     var actions = (
         \freq: { | val |
