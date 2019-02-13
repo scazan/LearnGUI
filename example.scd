@@ -15,9 +15,9 @@ Ndef(\sampleSynth).playN([0,1]);
 // Load the LearnGUI
 (
     var config = Dictionary.newFrom(List[
-        \windowTitle, "LearnGUI Example",
+        \windowTitle, "LearnGUI",
         \configFileName, "settingsForThisPatch.txt", // Make sure to set as we don't want to overwrite other settings files
-        \title, "OTO",
+        \title, "LearnGUI Example",
         \font, Font.defaultSansFace,
         \fontSize, 16,
         \backgroundColor, [0.0,0.0,0.0],
