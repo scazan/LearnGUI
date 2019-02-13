@@ -12,7 +12,7 @@ Clicking Save will persist those settings in the future. The last saved file wil
         Ndef(\sampleSynth, { | freq=400, amp=0, pan=0 |
             var out;
 
-            out = SinOsc.ar(freq*1000+60);
+            out = SinOsc.ar((freq*1000)+60);
 
             Pan2.ar(out, pan.linlin(0,1,-1,1)) * amp;
         });
@@ -24,9 +24,8 @@ Ndef(\sampleSynth).playN([0,1]);
 // Load the LearnGUI
 (
     var config = (
-        \windowTitle: "LearnGUI",
+        \windowTitle: "LearnGUI Example",
         \configFileName: "settingsForThisPatch.txt", // Make sure to set as we don't want to overwrite other settings files
-        \title: "LearnGUI Example",
         \font: Font.defaultSansFace,
         \fontSize: 16,
         \backgroundColor: [0.0,0.0,0.0],
@@ -36,13 +35,13 @@ Ndef(\sampleSynth).playN([0,1]);
 
     var actions = (
         \freq: { | val |
-            Ndef(\sampleSynth).set(\freq, (val/127));
+            Ndef(\sampleSynth).set(\freq, val);
         },
         \pan: { | val |
-            Ndef(\sampleSynth).set(\pan, (val/127));
+            Ndef(\sampleSynth).set(\pan, val);
         },
         \amp: { | val |
-            Ndef(\sampleSynth).set(\amp, (val/127));
+            Ndef(\sampleSynth).set(\amp, val);
         },
         \saveSettings: {
             learnGUI.saveSettings();
@@ -57,7 +56,7 @@ Ndef(\sampleSynth).playN([0,1]);
     learnGUI.setLayout(
         VLayout(
             HLayout(
-                StaticText().string_(config[\windowTitle])
+                StaticText().string_("LearnGUI")
                     .font_( Font(config[\font], 36))
                     .stringColor_(Color(*config[\foregroundColor])),
                     nil,
