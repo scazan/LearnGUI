@@ -5,6 +5,11 @@ A GUI class for [SuperCollider](https://supercollider.github.io/) for building M
 A small dot is placed next to each GUI element that can be clicked on allowing you to then touch the knob/slider/button you want to map and it will be automatically mapped.
 Clicking Save will persist those settings in the future. The last saved file will also automatically load on startup if one exists.
 
+###Install
+```
+Quarks.install("https://github.com/scazan/LearnGUI.git");
+```
+
 ### Example
 ```
 (
