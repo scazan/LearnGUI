@@ -1,0 +1,7 @@
+(
+  name: "LearnGUI",
+  summary: "A class for building MIDI-learnable GUI elements with the ability to save your MIDI mappings to file.",
+  author: "Scott Cazan",
+  version: "1.0.0",
+  schelp: "LearnGUI",
+)
