@@ -110,9 +110,9 @@ LearnGUI {
     }
 
     createLearnButton { | key, label, width |
-        var learnButton = Button.new(bounds: 12@12)
-        .fixedSize_(12@12)
-        .font_( Font(this.config[\activeColor], 20))
+        var learnButton = Button.new(bounds: 0@0)
+        .fixedSize_(24@24)
+        .font_( Font(this.config[\activeColor], 32))
         .action_({ | button |
             if(button.value == 1, {
                 this.currentLearningKey = key;
@@ -125,7 +125,7 @@ LearnGUI {
             label ="○";
         });
         learnButton.states_([
-            [label, Color(*this.config[\activeColor]++[0.1]), Color(*this.config[\backgroundColor]++[0])],
+            [label, Color(*this.config[\activeColor]++[0.2]), Color(*this.config[\backgroundColor]++[0])],
             [label, Color(*this.config[\backgroundColor]), Color(0,0.9,0)]
         ]);
         if(width.notNil(), {
