@@ -7,8 +7,10 @@ LearnGUI {
    var <>guiMappings,
        <>keyboardMappings,
        <>ccMappings,
+       <>noteMappings,
        <>currentLearningKey,
-       <>w;
+       <>w,
+       <>configDir;
 
     var liveInput = true;
 
@@ -41,7 +43,15 @@ LearnGUI {
         this.guiMappings = Dictionary();
         this.keyboardMappings = Dictionary();
         this.ccMappings = Dictionary();
+        this.noteMappings = Dictionary();
         this.currentLearningKey = nil;
+        this.configDir = (thisProcess.nowExecutingPath !? _.dirname) ?? Platform.userConfigDir;
+
+        // Default configFileName based on executing file if not provided
+        if(this.config[\configFileName].isNil) {
+            var filename = thisProcess.nowExecutingPath !? { |p| p.basename.splitext[0] } ?? "learnGUI";
+            this.config[\configFileName] = filename ++ ".midi.config";
+        };
 
         // MIDI Feedback initialization
         this.feedbackOverrides = Dictionary();
@@ -110,7 +120,7 @@ LearnGUI {
 
     // MIDI Feedback Methods
     sendFeedback { |key, value|
-        var mapping, override, ccNum, chan, src, midiOut, midiValue;
+        var mapping, noteMapping, override, num, chan, src, midiOut, midiValue, isNote = false;
 
         // Check global toggle
         if(feedbackEnabled.not) { ^this };
@@ -122,30 +132,42 @@ LearnGUI {
         // Prevent feedback loop
         if(isProcessingMIDI) { ^this };
 
-        // Get the learned mapping
+        // Check for note mapping first, then CC mapping
+        noteMapping = noteMappings[key];
         mapping = ccMappings[key];
-        if(mapping.isNil) { ^this };
 
-        // Convert 0-1 to 0-127
-        midiValue = (value * 127).round.asInteger.clip(0, 127);
-
-        // Determine CC/channel from override or learned mapping
-        if(override.notNil and: { override[\cc].notNil }) {
-            ccNum = override[\cc];
-            chan = override[\chan] ? 0;
-            src = override[\src] ? mapping[2];
+        if(noteMapping.notNil) {
+            isNote = true;
+            num = noteMapping[0];
+            chan = noteMapping[1];
+            src = noteMapping[2];
         } {
-            ccNum = mapping[0];
+            if(mapping.isNil) { ^this };
+            num = mapping[0];
             chan = mapping[1];
             src = mapping[2];
         };
+
+        // Apply overrides if present
+        if(override.notNil) {
+            if(override[\cc].notNil) { num = override[\cc] };
+            if(override[\chan].notNil) { chan = override[\chan] };
+            if(override[\src].notNil) { src = override[\src] };
+        };
+
+        // Convert 0-1 to 0-127
+        midiValue = (value * 127).round.asInteger.clip(0, 127);
 
         // Get MIDIOut for this source device
         midiOut = this.getMIDIOutForSource(src);
         if(midiOut.isNil) { ^this };
 
-        // Send CC feedback
-        midiOut.control(chan, ccNum, midiValue);
+        // Send feedback (note or CC based on how it was learned)
+        if(isNote) {
+            midiOut.noteOn(chan, num, midiValue);
+        } {
+            midiOut.control(chan, num, midiValue);
+        };
     }
 
     sendNoteFeedback { |key, value, noteNum, chan, src|
@@ -154,13 +176,20 @@ LearnGUI {
         if(feedbackEnabled.not) { ^this };
         if(isProcessingMIDI) { ^this };
 
-        // If no src provided, try to get from ccMappings
-        if(src.isNil) {
-            mapping = ccMappings[key];
-            if(mapping.notNil) { src = mapping[2] };
+        // If no params provided, try to get from noteMappings, then ccMappings
+        if(noteNum.isNil or: src.isNil) {
+            mapping = noteMappings[key];
+            if(mapping.notNil) {
+                noteNum = noteNum ? mapping[0];
+                chan = chan ? mapping[1];
+                src = src ? mapping[2];
+            } {
+                mapping = ccMappings[key];
+                if(mapping.notNil) { src = src ? mapping[2] };
+            };
         };
 
-        if(src.isNil) { ^this };
+        if(src.isNil or: noteNum.isNil) { ^this };
 
         midiOut = this.getMIDIOutForSource(src);
         if(midiOut.isNil) { ^this };
@@ -431,6 +460,17 @@ LearnGUI {
         }, num, chan, src);
     }
 
+    mapNoteListener { | learningKey, num, chan, src |
+        this.noteMappings[learningKey] = [num, chan, src];
+        MIDIdef.noteOn(learningKey, { | val |
+            isProcessingMIDI = true;
+            {
+                this.guiMappings.at(learningKey.asSymbol)[0].valueAction = val/127;
+                isProcessingMIDI = false;
+            }.defer;
+        }, num, chan, src);
+    }
+
     setupMIDILearn {
         MIDIdef.freeAll;
         MIDIdef.cc(\ccLearn, { | val, num, chan, src |
@@ -447,13 +487,7 @@ LearnGUI {
                 var learningKey = this.currentLearningKey.asString();
                 {this.guiMappings.at(learningKey.asSymbol)[1].valueAction = 0;}.defer;
                 this.currentLearningKey = nil;
-                MIDIdef.noteOn(learningKey, { | val |
-                    isProcessingMIDI = true;
-                    {
-                        this.guiMappings.at(learningKey.asSymbol)[0].valueAction = val/127;
-                        isProcessingMIDI = false;
-                    }.defer;
-                }, num, chan, src);
+                this.mapNoteListener(learningKey, num, chan, src);
             });
         });
         MIDIdef.noteOn(\threshLearn, { | velocity, num, chan, src |
@@ -484,6 +518,7 @@ LearnGUI {
             "SAVED".postln;
         };
         var configList = List.newUsing(this.config.getPairs);
+
         configList.add("keyboardMappings");
         this.keyboardMappings.keysValuesDo({ |key, map|
             configList.add(key);
@@ -494,6 +529,10 @@ LearnGUI {
         this.ccMappings.getPairs.do({ |map|
             configList.add(map);
         });
+        configList.add("noteMappings");
+        this.noteMappings.getPairs.do({ |map|
+            configList.add(map);
+        });
         // Save feedback settings
         configList.add("feedbackEnabled");
         configList.add(feedbackEnabled.asString);
@@ -502,10 +541,12 @@ LearnGUI {
             configList.add(key);
             configList.add(override.asString);
         });
-        arrayToFile.(configList.asArray, Platform.userConfigDir ++ "/" ++ this.config[\configFileName]);
+        ("Saving settings to: " ++ configDir ++ "/" ++ this.config[\configFileName]).postln;
+        arrayToFile.(configList.asArray, configDir ++ "/" ++ this.config[\configFileName]);
     }
 
     loadSettings {
+        var settingsFilePath = configDir ++ "/" ++ this.config[\configFileName];
         var fileToDictionary = {| path |
             var file, fileValues, t, array, lineNumber=0;
             var result = Dictionary();
@@ -524,21 +565,30 @@ LearnGUI {
                         if(keyboardKey == "ccMappings", {
                             var ccKey;
                             result[\ccMappings] = Dictionary();
-                            while({(ccKey = file.getLine()).notNil() and: { ccKey != "feedbackEnabled" }}, {
+                            while({(ccKey = file.getLine()).notNil() and: { ccKey != "noteMappings" }}, {
                                 var ccVal = file.getLine();
 
                                 result[\ccMappings][ccKey.asSymbol] = ccVal.interpret;
                             });
-                            // Parse feedbackEnabled if we hit it
-                            if(ccKey == "feedbackEnabled", {
-                                result[\feedbackEnabled] = file.getLine();
-                                // Check for feedbackOverrides
-                                if(file.getLine() == "feedbackOverrides", {
-                                    var overrideKey;
-                                    result[\feedbackOverrides] = Dictionary();
-                                    while({(overrideKey = file.getLine()).notNil()}, {
-                                        var overrideVal = file.getLine();
-                                        result[\feedbackOverrides][overrideKey.asSymbol] = overrideVal;
+                            // Parse noteMappings if we hit it
+                            if(ccKey == "noteMappings", {
+                                var noteKey;
+                                result[\noteMappings] = Dictionary();
+                                while({(noteKey = file.getLine()).notNil() and: { noteKey != "feedbackEnabled" }}, {
+                                    var noteVal = file.getLine();
+                                    result[\noteMappings][noteKey.asSymbol] = noteVal.interpret;
+                                });
+                                // Parse feedbackEnabled if we hit it
+                                if(noteKey == "feedbackEnabled", {
+                                    result[\feedbackEnabled] = file.getLine();
+                                    // Check for feedbackOverrides
+                                    if(file.getLine() == "feedbackOverrides", {
+                                        var overrideKey;
+                                        result[\feedbackOverrides] = Dictionary();
+                                        while({(overrideKey = file.getLine()).notNil()}, {
+                                            var overrideVal = file.getLine();
+                                            result[\feedbackOverrides][overrideKey.asSymbol] = overrideVal;
+                                        });
                                     });
                                 });
                             });
@@ -560,14 +610,18 @@ LearnGUI {
 
             result;
         };
-
-        var settingsFilePath = Platform.userConfigDir ++ "/" ++ this.config[\configFileName];
         if(File.exists(settingsFilePath.standardizePath), {
             var configDictionary = fileToDictionary.(settingsFilePath);
 
             if(configDictionary[\ccMappings].notNil(), {
                 configDictionary[\ccMappings].keysValuesDo({ | key, value |
                     this.mapCCListener(key.asSymbol, *value);
+                });
+            });
+
+            if(configDictionary[\noteMappings].notNil(), {
+                configDictionary[\noteMappings].keysValuesDo({ | key, value |
+                    this.mapNoteListener(key.asSymbol, *value);
                 });
             });
 
