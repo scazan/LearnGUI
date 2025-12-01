@@ -13,7 +13,7 @@ LearnGUI {
     var liveInput = true;
 
     // MIDI Feedback
-    var <>midiOut;
+    var <>midiOutCache;
     var <>feedbackEnabled = true;
     var <>feedbackOverrides;
     var <isProcessingMIDI = false;
@@ -68,27 +68,49 @@ LearnGUI {
 
     // MIDI Output Setup
     setupMIDIOut {
-        var outDevice = config[\midiOutDevice] ? 0;
-        if(MIDIClient.destinations.size > 0, {
-            midiOut = MIDIOut.new(outDevice);
-            midiOut.latency = 0;
-        }, {
-            "LearnGUI: No MIDI output devices available".postln;
-        });
+        midiOutCache = Dictionary();
     }
 
-    setMIDIOutDevice { |deviceIndex|
-        if(MIDIClient.destinations.size > deviceIndex, {
-            midiOut = MIDIOut.new(deviceIndex);
+    getMIDIOutForSource { |src|
+        var midiOut, destIndex;
+
+        // Return cached MIDIOut if available
+        if(midiOutCache[src].notNil) {
+            ^midiOutCache[src];
+        };
+
+        // Find destination matching source UID
+        // In SuperCollider, input source UIDs often correspond to output destination UIDs
+        destIndex = MIDIClient.destinations.detectIndex({ |dest| dest.uid == src });
+
+        if(destIndex.notNil, {
+            midiOut = MIDIOut.new(destIndex);
             midiOut.latency = 0;
+            midiOutCache[src] = midiOut;
+            ^midiOut;
         }, {
-            ("LearnGUI: MIDI output device index " ++ deviceIndex ++ " not available").postln;
+            // Fallback: try to find by device name matching
+            var srcEndpoint = MIDIClient.sources.detect({ |s| s.uid == src });
+            if(srcEndpoint.notNil, {
+                destIndex = MIDIClient.destinations.detectIndex({ |dest|
+                    dest.device == srcEndpoint.device
+                });
+                if(destIndex.notNil, {
+                    midiOut = MIDIOut.new(destIndex);
+                    midiOut.latency = 0;
+                    midiOutCache[src] = midiOut;
+                    ^midiOut;
+                });
+            });
         });
+
+        // No matching destination found
+        ^nil;
     }
 
     // MIDI Feedback Methods
     sendFeedback { |key, value|
-        var mapping, override, ccNum, chan, midiValue;
+        var mapping, override, ccNum, chan, src, midiOut, midiValue;
 
         // Check global toggle
         if(feedbackEnabled.not) { ^this };
@@ -100,8 +122,9 @@ LearnGUI {
         // Prevent feedback loop
         if(isProcessingMIDI) { ^this };
 
-        // Check if midiOut is available
-        if(midiOut.isNil) { ^this };
+        // Get the learned mapping
+        mapping = ccMappings[key];
+        if(mapping.isNil) { ^this };
 
         // Convert 0-1 to 0-127
         midiValue = (value * 127).round.asInteger.clip(0, 127);
@@ -110,33 +133,48 @@ LearnGUI {
         if(override.notNil and: { override[\cc].notNil }) {
             ccNum = override[\cc];
             chan = override[\chan] ? 0;
+            src = override[\src] ? mapping[2];
         } {
-            mapping = ccMappings[key];
-            if(mapping.isNil) { ^this };
             ccNum = mapping[0];
             chan = mapping[1];
+            src = mapping[2];
         };
+
+        // Get MIDIOut for this source device
+        midiOut = this.getMIDIOutForSource(src);
+        if(midiOut.isNil) { ^this };
 
         // Send CC feedback
         midiOut.control(chan, ccNum, midiValue);
     }
 
-    sendNoteFeedback { |key, value, noteNum, chan|
-        var midiValue;
+    sendNoteFeedback { |key, value, noteNum, chan, src|
+        var midiOut, midiValue, mapping;
 
         if(feedbackEnabled.not) { ^this };
         if(isProcessingMIDI) { ^this };
+
+        // If no src provided, try to get from ccMappings
+        if(src.isNil) {
+            mapping = ccMappings[key];
+            if(mapping.notNil) { src = mapping[2] };
+        };
+
+        if(src.isNil) { ^this };
+
+        midiOut = this.getMIDIOutForSource(src);
         if(midiOut.isNil) { ^this };
 
         midiValue = (value * 127).round.asInteger.clip(0, 127);
         midiOut.noteOn(chan ? 0, noteNum, midiValue);
     }
 
-    setElementFeedback { |key, enabled, ccOverride, chanOverride|
+    setElementFeedback { |key, enabled, ccOverride, chanOverride, srcOverride|
         feedbackOverrides[key] = (
             enabled: enabled,
             cc: ccOverride,
-            chan: chanOverride
+            chan: chanOverride,
+            src: srcOverride
         );
     }
 

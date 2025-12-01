@@ -81,3 +81,62 @@ Ndef(\sampleSynth).playN([0,1]);
     );
 )
 ```
+
+### MIDI Feedback
+
+LearnGUI supports bidirectional MIDI communication, allowing GUI changes to be sent back to your MIDI controller. This keeps hardware with motorized faders, LED rings, or displays in sync with the software.
+
+Feedback is automatically routed to the same MIDI device that was learned for each control, so multi-controller setups should work.
+
+#### Enabling Feedback
+
+Feedback is enabled by default. You can add a toggle button to your layout if you want:
+
+```supercollider
+learnGUI.setLayout(
+    VLayout(
+        HLayout(
+            learnGUI.button(["Save"], \saveSettings, 90, 35),
+            learnGUI.feedbackToggle,
+        ),
+        // ... rest of layout
+    )
+);
+```
+
+Or control it programmatically:
+
+```supercollider
+learnGUI.feedbackEnabled = true;   // Enable feedback
+learnGUI.feedbackEnabled = false;  // Disable feedback
+```
+
+#### Syncing to Hardware
+
+To sync all current GUI values to your controller (useful on startup or after loading a preset):
+
+```supercollider
+learnGUI.syncAllToHardware;
+```
+
+#### Per-Element Configuration
+
+By default, feedback is sent on the same CC/channel that was learned. You can override this per-element:
+
+```supercollider
+// Disable feedback for a specific element
+learnGUI.setElementFeedback(\freq, enabled: false);
+
+// Override CC number and channel for an element
+learnGUI.setElementFeedback(\pan, enabled: true, ccOverride: 10, chanOverride: 0);
+```
+
+#### Note-Based Feedback
+
+For controllers that use note messages (e.g., button LEDs):
+
+```supercollider
+learnGUI.sendNoteFeedback(\myButton, value, noteNum: 60, chan: 0);
+```
+
+Feedback settings are automatically saved and loaded with your other MIDI mappings.
