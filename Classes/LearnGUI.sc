@@ -53,6 +53,16 @@ LearnGUI {
             this.config[\configFileName] = filename ++ ".midi.config";
         };
 
+        // Default font if not provided
+        if(this.config[\font].isNil) {
+            this.config[\font] = Font.defaultMonoFace;
+        };
+
+        // Default fontSize if not provided
+        if(this.config[\fontSize].isNil) {
+            this.config[\fontSize] = 16;
+        };
+
         // MIDI Feedback initialization
         this.feedbackOverrides = Dictionary();
 
@@ -222,7 +232,7 @@ LearnGUI {
     createFeedbackToggle {
         ^Button()
             .fixedSize_(120@35)
-            .font_(Font(Font.defaultSerifFace, 14))
+            .font_(Font(this.config[\font], this.config[\fontSize]))
             .states_([
                 ["Feedback OFF", Color(*this.config[\foregroundColor]), Color.gray(0.4)],
                 ["Feedback ON", Color(*this.config[\foregroundColor]), Color.green(0.6)]
@@ -292,7 +302,8 @@ LearnGUI {
     createLearnButton { | key, label, width |
         var learnButton = Button.new(bounds: 0@0)
         .fixedSize_(18@18)
-        .font_( Font(this.config[\font], 12))
+        .font_( Font(this.config[\font], 14))
+        .focusColor_(Color.clear)
         .action_({ | button |
             if(button.value == 1, {
                 this.currentLearningKey = key;
@@ -302,11 +313,11 @@ LearnGUI {
         });
         var learnLabel = label;
         if(label.isNil(), {
-            label ="○";
+            label ="●";
         });
         learnButton.states_([
-            [label, Color(*this.config[\foregroundColor]++[0.3]), Color(*this.config[\backgroundColor]++[0])],
-            [label, Color.green, Color(*this.config[\backgroundColor]++[0])]
+            [label, Color(*this.config[\foregroundColor]++[0.1]), Color(*this.config[\backgroundColor]++[0])],
+            [label, Color.new(0, 0.9, 0.5), Color(*this.config[\backgroundColor]++[0])]
         ]);
         if(width.notNil(), {
             learnButton.fixedWidth_(width);
@@ -321,7 +332,7 @@ LearnGUI {
     createButton { | label, key, width, height |
         var newButton = Button.new()
         .fixedSize_(150@100)
-        .font_( Font(Font.defaultSerifFace, 24))
+        .font_( Font(this.config[\font], this.config[\fontSize]))
         .action_({
             this.sendFeedback(key, newButton.value);
             this.actions[key].(newButton.value);
@@ -380,7 +391,7 @@ LearnGUI {
             ["Load sound file", Color(*this.config[\foregroundColor]), Color(*this.config[\backgroundColor])],
             ["Loaded", Color(*this.config[\foregroundColor]), Color(*this.config[\backgroundColor])]
         ])
-        .font_( Font(Font.defaultSerifFace, 12))
+        .font_( Font(this.config[\font], this.config[\fontSize]))
         .fixedWidth_(125);
 
         loadFile1.action = {| button |
@@ -414,7 +425,7 @@ LearnGUI {
             ["Set velocity", Color(*this.config[\foregroundColor]), Color(*this.config[\backgroundColor])],
             [ "Strike a key", Color(*this.config[\foregroundColor]), Color.magenta]
         ])
-        .font_(Font(Font.defaultSerifFace, 14));
+        .font_(Font(this.config[\font], this.config[\fontSize]));
 
         // Keep track of this element in a dict
         this.guiMappings.add(key -> [knob, learnButton]);
@@ -424,7 +435,7 @@ LearnGUI {
             [StaticText()
                 .string_("Set the velocity for the alternative tones by striking a key at the desired velocity")
                 .maxWidth_(120)
-                .font_(Font(Font.defaultSerifFace, 14))
+                .font_(Font(this.config[\font], this.config[\fontSize]))
             ,\align: \center],
             nil,
         ),
