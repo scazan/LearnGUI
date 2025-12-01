@@ -12,6 +12,12 @@ LearnGUI {
 
     var liveInput = true;
 
+    // MIDI Feedback
+    var <>midiOut;
+    var <>feedbackEnabled = true;
+    var <>feedbackOverrides;
+    var <isProcessingMIDI = false;
+
     *new { | config, actions |
         ^super.new.init(config, actions);
     }
@@ -37,9 +43,13 @@ LearnGUI {
         this.ccMappings = Dictionary();
         this.currentLearningKey = nil;
 
+        // MIDI Feedback initialization
+        this.feedbackOverrides = Dictionary();
+
         // START
         MIDIClient.init(verbose: false);
         MIDIIn.connectAll;
+        this.setupMIDIOut();
         this.setupMIDILearn();
         this.loadSettings();
         // this.actions[\start].();
@@ -54,6 +64,106 @@ LearnGUI {
 
     getWindow {
         ^this.w;
+    }
+
+    // MIDI Output Setup
+    setupMIDIOut {
+        var outDevice = config[\midiOutDevice] ? 0;
+        if(MIDIClient.destinations.size > 0, {
+            midiOut = MIDIOut.new(outDevice);
+            midiOut.latency = 0;
+        }, {
+            "LearnGUI: No MIDI output devices available".postln;
+        });
+    }
+
+    setMIDIOutDevice { |deviceIndex|
+        if(MIDIClient.destinations.size > deviceIndex, {
+            midiOut = MIDIOut.new(deviceIndex);
+            midiOut.latency = 0;
+        }, {
+            ("LearnGUI: MIDI output device index " ++ deviceIndex ++ " not available").postln;
+        });
+    }
+
+    // MIDI Feedback Methods
+    sendFeedback { |key, value|
+        var mapping, override, ccNum, chan, midiValue;
+
+        // Check global toggle
+        if(feedbackEnabled.not) { ^this };
+
+        // Check per-element override
+        override = feedbackOverrides[key];
+        if(override.notNil and: { override[\enabled] == false }) { ^this };
+
+        // Prevent feedback loop
+        if(isProcessingMIDI) { ^this };
+
+        // Check if midiOut is available
+        if(midiOut.isNil) { ^this };
+
+        // Convert 0-1 to 0-127
+        midiValue = (value * 127).round.asInteger.clip(0, 127);
+
+        // Determine CC/channel from override or learned mapping
+        if(override.notNil and: { override[\cc].notNil }) {
+            ccNum = override[\cc];
+            chan = override[\chan] ? 0;
+        } {
+            mapping = ccMappings[key];
+            if(mapping.isNil) { ^this };
+            ccNum = mapping[0];
+            chan = mapping[1];
+        };
+
+        // Send CC feedback
+        midiOut.control(chan, ccNum, midiValue);
+    }
+
+    sendNoteFeedback { |key, value, noteNum, chan|
+        var midiValue;
+
+        if(feedbackEnabled.not) { ^this };
+        if(isProcessingMIDI) { ^this };
+        if(midiOut.isNil) { ^this };
+
+        midiValue = (value * 127).round.asInteger.clip(0, 127);
+        midiOut.noteOn(chan ? 0, noteNum, midiValue);
+    }
+
+    setElementFeedback { |key, enabled, ccOverride, chanOverride|
+        feedbackOverrides[key] = (
+            enabled: enabled,
+            cc: ccOverride,
+            chan: chanOverride
+        );
+    }
+
+    syncAllToHardware {
+        guiMappings.keysValuesDo { |key, guiArray|
+            var guiElement = guiArray[0];
+            if(guiElement.respondsTo(\value)) {
+                this.sendFeedback(key, guiElement.value);
+            };
+        };
+    }
+
+    feedbackToggle { | ...args |
+        ^this.createFeedbackToggle(*args);
+    }
+    createFeedbackToggle {
+        ^Button()
+            .fixedSize_(120@35)
+            .font_(Font(Font.defaultSerifFace, 14))
+            .states_([
+                ["Feedback OFF", Color(*this.config[\foregroundColor]), Color.gray(0.4)],
+                ["Feedback ON", Color(*this.config[\foregroundColor]), Color.green(0.6)]
+            ])
+            .value_(feedbackEnabled.asInteger)
+            .action_({ |but|
+                feedbackEnabled = but.value.asBoolean;
+            });
     }
 
     midiChooser { | ...args |
@@ -81,7 +191,10 @@ LearnGUI {
     createSlider { | label, key, dimensions |
         var newSlider = Slider.new()
 
-        .action_({this.actions[key].(newSlider.value)})
+        .action_({
+            this.sendFeedback(key, newSlider.value);
+            this.actions[key].(newSlider.value);
+        })
         .background_(Color(*this.config[\backgroundColor]))
         .knobColor_(this.config[\knobColor]);
 
@@ -142,7 +255,10 @@ LearnGUI {
         var newButton = Button.new()
         .fixedSize_(150@100)
         .font_( Font(Font.defaultSerifFace, 24))
-        .action_({this.actions[key].(newButton.value)});
+        .action_({
+            this.sendFeedback(key, newButton.value);
+            this.actions[key].(newButton.value);
+        });
 
         var learnButton = this.createLearnButton(key);
 
@@ -221,7 +337,10 @@ LearnGUI {
     createThresholdWidget { | label, key |
         var knob = Knob()
         .fixedSize_(50@50)
-        .action_({this.actions[key].(knob.value)});
+        .action_({
+            this.sendFeedback(key, knob.value);
+            this.actions[key].(knob.value);
+        });
 
         var learnButton = this.createLearnButton(key, "Set", 75)
         .states_([
@@ -266,8 +385,10 @@ LearnGUI {
     mapCCListener { | learningKey, num, chan, src |
         this.ccMappings[learningKey] = [num, chan, src];
         MIDIdef.cc(learningKey, { | val |
+            isProcessingMIDI = true;
             {
                 this.guiMappings.at(learningKey.asSymbol)[0].valueAction = val/127;
+                isProcessingMIDI = false;
             }.defer;
         }, num, chan, src);
     }
@@ -289,8 +410,10 @@ LearnGUI {
                 {this.guiMappings.at(learningKey.asSymbol)[1].valueAction = 0;}.defer;
                 this.currentLearningKey = nil;
                 MIDIdef.noteOn(learningKey, { | val |
+                    isProcessingMIDI = true;
                     {
                         this.guiMappings.at(learningKey.asSymbol)[0].valueAction = val/127;
+                        isProcessingMIDI = false;
                     }.defer;
                 }, num, chan, src);
             });
@@ -305,8 +428,10 @@ LearnGUI {
                     this.guiMappings.at(learningKey.asSymbol)[1].valueAction = 0;
                 }.defer;
 
+                isProcessingMIDI = true;
                 {
                     this.guiMappings.at(learningKey.asSymbol)[0].valueAction = velocity/127;
+                    isProcessingMIDI = false;
                 }.defer;
             });
         });
@@ -331,6 +456,14 @@ LearnGUI {
         this.ccMappings.getPairs.do({ |map|
             configList.add(map);
         });
+        // Save feedback settings
+        configList.add("feedbackEnabled");
+        configList.add(feedbackEnabled.asString);
+        configList.add("feedbackOverrides");
+        this.feedbackOverrides.keysValuesDo({ |key, override|
+            configList.add(key);
+            configList.add(override.asString);
+        });
         arrayToFile.(configList.asArray, Platform.userConfigDir ++ "/" ++ this.config[\configFileName]);
     }
 
@@ -353,10 +486,23 @@ LearnGUI {
                         if(keyboardKey == "ccMappings", {
                             var ccKey;
                             result[\ccMappings] = Dictionary();
-                            while({(ccKey = file.getLine()).notNil()}, {
+                            while({(ccKey = file.getLine()).notNil() and: { ccKey != "feedbackEnabled" }}, {
                                 var ccVal = file.getLine();
 
                                 result[\ccMappings][ccKey.asSymbol] = ccVal.interpret;
+                            });
+                            // Parse feedbackEnabled if we hit it
+                            if(ccKey == "feedbackEnabled", {
+                                result[\feedbackEnabled] = file.getLine();
+                                // Check for feedbackOverrides
+                                if(file.getLine() == "feedbackOverrides", {
+                                    var overrideKey;
+                                    result[\feedbackOverrides] = Dictionary();
+                                    while({(overrideKey = file.getLine()).notNil()}, {
+                                        var overrideVal = file.getLine();
+                                        result[\feedbackOverrides][overrideKey.asSymbol] = overrideVal;
+                                    });
+                                });
                             });
                         }, {
                             keyboardDevice = file.getLine();
@@ -396,6 +542,17 @@ LearnGUI {
 
             if(configDictionary[\sampleFilePath].notNil(), {
                 this.loadSample(configDictionary[\sampleFilePath]);
+            });
+
+            // Load feedback settings
+            if(configDictionary[\feedbackEnabled].notNil(), {
+                feedbackEnabled = configDictionary[\feedbackEnabled].interpret;
+            });
+
+            if(configDictionary[\feedbackOverrides].notNil(), {
+                configDictionary[\feedbackOverrides].keysValuesDo({ |key, value|
+                    feedbackOverrides[key.asSymbol] = value.interpret;
+                });
             });
         }, {
             "No configuration present".postln;
