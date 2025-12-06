@@ -226,6 +226,50 @@ LearnGUI {
         };
     }
 
+    // Get all current widget values as a Dictionary
+    getValues {
+        var values = Dictionary();
+        guiMappings.keysValuesDo { |key, guiArray|
+            var guiElement = guiArray[0];
+            if(guiElement.respondsTo(\value)) {
+                values[key] = guiElement.value;
+            };
+        };
+        ^values;
+    }
+
+    // Set all widget values from a Dictionary
+    setValues { |values|
+        values.keysValuesDo { |key, value|
+            this.setValue(key, value);
+        };
+    }
+
+    // Get a single widget value by key
+    getValue { |key|
+        var guiArray = guiMappings[key];
+        if(guiArray.notNil and: { guiArray[0].respondsTo(\value) }) {
+            ^guiArray[0].value;
+        };
+        ^nil;
+    }
+
+    // Set a single widget value by key (triggers action and feedback)
+    setValue { |key, value|
+        var guiArray = guiMappings[key.asSymbol];
+        if(guiArray.notNil) {
+            { guiArray[0].valueAction_(value) }.defer;
+        };
+    }
+
+    // Set a single widget value without triggering action
+    setValueSilent { |key, value|
+        var guiArray = guiMappings[key.asSymbol];
+        if(guiArray.notNil) {
+            { guiArray[0].value_(value) }.defer;
+        };
+    }
+
     feedbackToggle { | ...args |
         ^this.createFeedbackToggle(*args);
     }
@@ -294,7 +338,8 @@ LearnGUI {
             HLayout(
                 newSlider,
                 [learnButton, \align: \topLeft],
-            ).spacing_(0),
+                nil
+            ).spacing_(0).margins_(0),
             sliderLabel,
         );
     }
@@ -361,8 +406,8 @@ LearnGUI {
             newButton.fixedHeight_(height);
         });
 
-        ^HLayout([newButton, \align: \topLeft], [ learnButton, \align: \topLeft ], nil)
-            .spacing_(0);
+        ^HLayout([newButton, \align: \topLeft], [learnButton, \align: \topLeft], nil)
+            .spacing_(0).margins_(0);
     }
 
     loadSample { | filePath |
