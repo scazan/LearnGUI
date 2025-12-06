@@ -24,6 +24,11 @@ LearnGUI {
     var <>presetBank;
     var <>presetButtons;
 
+    // Unsaved changes tracking
+    var <>isDirty = false;
+    var <>onDirtyStateChanged;
+    var isLoading = false;
+
     *new { | config, actions |
         ^super.new.init(config, actions);
     }
@@ -34,6 +39,44 @@ LearnGUI {
         this.w = Window.new(config[\windowTitle]);
         this.w.background = Color(*config[\backgroundColor]);
         this.w.onClose_({
+            // Check for unsaved changes before fully closing
+            if(isDirty) {
+                // Show save dialog centered on screen
+                {
+                    var screenBounds = Window.screenBounds;
+                    var dialogWidth = 300, dialogHeight = 120;
+                    var dialogX = (screenBounds.width - dialogWidth) / 2;
+                    var dialogY = (screenBounds.height - dialogHeight) / 2;
+                    var dialog = Window("Unsaved Changes", Rect(dialogX, dialogY, dialogWidth, dialogHeight), resizable: false);
+                    var msg, saveBtn, discardBtn;
+
+                    dialog.background = Color(*this.config[\backgroundColor]);
+
+                    msg = StaticText(dialog, Rect(20, 15, 260, 40))
+                        .string_("You had unsaved changes.\nWould you like to save them?")
+                        .align_(\center)
+                        .font_(Font(this.config[\font], this.config[\fontSize]))
+                        .stringColor_(Color(*this.config[\foregroundColor]));
+
+                    saveBtn = Button(dialog, Rect(30, 65, 100, 30))
+                        .font_(Font(this.config[\font], this.config[\fontSize]))
+                        .states_([["Save", Color(*this.config[\backgroundColor]), Color(*this.config[\activeColor])]])
+                        .action_({
+                            this.saveSettings();
+                            dialog.close();
+                        });
+
+                    discardBtn = Button(dialog, Rect(170, 65, 100, 30))
+                        .font_(Font(this.config[\font], this.config[\fontSize]))
+                        .states_([["Discard", Color(*this.config[\foregroundColor]), Color(*this.config[\backgroundColor])]])
+                        .action_({
+                            dialog.close();
+                        });
+
+                    dialog.front;
+                }.defer;
+            };
+
             MIDIdef.freeAll;
             MIDIClient.disposeClient;
 
@@ -230,6 +273,26 @@ LearnGUI {
             var guiElement = guiArray[0];
             if(guiElement.respondsTo(\value)) {
                 this.sendFeedback(key, guiElement.value);
+            };
+        };
+    }
+
+    // Mark state as having unsaved changes
+    markDirty {
+        if(isLoading.not && isDirty.not) {
+            isDirty = true;
+            if(onDirtyStateChanged.notNil) {
+                onDirtyStateChanged.(true);
+            };
+        };
+    }
+
+    // Mark state as saved (called after saveSettings)
+    markClean {
+        if(isDirty) {
+            isDirty = false;
+            if(onDirtyStateChanged.notNil) {
+                onDirtyStateChanged.(false);
             };
         };
     }
@@ -554,6 +617,7 @@ LearnGUI {
                                 { view.value = 1 }.defer;  // Show as "has data"
                                 ("Stored preset " ++ (index + 1)).postln;
                             };
+                            this.markDirty();
                         } {
                             // Regular click: recall values from this slot
                             if(this.presetBank[index].notNil) {
@@ -608,6 +672,7 @@ LearnGUI {
 
     mapCCListener { | learningKey, num, chan, src |
         this.ccMappings[learningKey] = [num, chan, src];
+        this.markDirty();
         MIDIdef.cc(learningKey, { | val |
             isProcessingMIDI = true;
             {
@@ -619,6 +684,7 @@ LearnGUI {
 
     mapNoteListener { | learningKey, num, chan, src |
         this.noteMappings[learningKey] = [num, chan, src];
+        this.markDirty();
         MIDIdef.noteOn(learningKey, { | val |
             isProcessingMIDI = true;
             {
@@ -672,6 +738,7 @@ LearnGUI {
             file = File.new(path.standardizePath, "w");
             array.size.do{|i| file.write(array[i].value.asString ++ "\n"); };
             file.close;
+            this.markClean();
             "SAVED".postln;
         };
         var configList = List.newUsing(this.config.getPairs);
@@ -790,6 +857,9 @@ LearnGUI {
         if(File.exists(settingsFilePath.standardizePath), {
             var configDictionary = fileToDictionary.(settingsFilePath);
 
+            // Suppress dirty marking during load
+            isLoading = true;
+
             if(configDictionary[\ccMappings].notNil(), {
                 configDictionary[\ccMappings].keysValuesDo({ | key, value |
                     this.mapCCListener(key.asSymbol, *value);
@@ -828,6 +898,9 @@ LearnGUI {
             if(configDictionary[\presetBank].notNil(), {
                 this.presetBank = configDictionary[\presetBank];
             });
+
+            // Done loading
+            isLoading = false;
         }, {
             "No configuration present".postln;
         });
