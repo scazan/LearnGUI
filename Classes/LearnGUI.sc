@@ -573,7 +573,8 @@ LearnGUI {
                 nil
             ).spacing_(0).margins_(0),
             knobLabel,
-        );
+            nil
+        ).spacing_(2).margins_(0);
     }
 
     // Create a preset grid and register it
