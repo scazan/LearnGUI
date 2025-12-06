@@ -29,6 +29,9 @@ LearnGUI {
     var <>onDirtyStateChanged;
     var isLoading = false;
 
+    // Elements that ignore preset recalls
+    var <>presetIgnoreKeys;
+
     *new { | config, actions |
         ^super.new.init(config, actions);
     }
@@ -116,6 +119,7 @@ LearnGUI {
         // Preset Grids initialization
         this.presetGrids = Dictionary();
         this.loadedPresetData = Dictionary();
+        this.presetIgnoreKeys = Set();
 
         // START
         MIDIClient.init(verbose: false);
@@ -309,11 +313,12 @@ LearnGUI {
         ^values;
     }
 
-    // Set all widget values from a Dictionary (skips buttons to avoid triggering actions)
+    // Set all widget values from a Dictionary (skips buttons and ignored keys)
     setValues { |values|
         values.keysValuesDo { |key, value|
             var guiArray = guiMappings[key.asSymbol];
-            if(guiArray.notNil && (guiArray[0].class != Button)) {
+            var isIgnored = presetIgnoreKeys.includes(key.asSymbol);
+            if(guiArray.notNil && (guiArray[0].class != Button) && isIgnored.not) {
                 this.setValue(key, value);
             };
         };
@@ -380,10 +385,10 @@ LearnGUI {
         ^menu;
     }
 
-    slider { | ...args |
-        ^this.createSlider(*args);
+    slider { | label, key, dimensions, automation = true |
+        ^this.createSlider(label, key, dimensions, automation);
     }
-    createSlider { | label, key, dimensions |
+    createSlider { | label, key, dimensions, automation = true |
         var newSlider = Slider.new()
 
         .action_({
@@ -405,6 +410,12 @@ LearnGUI {
         },{
             newSlider.fixedSize_(75@300)
         });
+
+        // Register to ignore presets if automation is disabled
+        if(automation.not) {
+            presetIgnoreKeys.add(key.asSymbol);
+        };
+
         // Keep track of this element in a dict
         this.guiMappings.add(key -> [newSlider, learnButton]);
 
@@ -445,8 +456,8 @@ LearnGUI {
         ^learnButton;
     }
 
-    button { | ...args |
-        ^this.createButton(*args);
+    button { | label, key, width, height |
+        ^this.createButton(label, key, width, height);
     }
     createButton { | label, key, width, height |
         var newButton = Button.new()
@@ -528,46 +539,48 @@ LearnGUI {
         ^VLayout(menu, loadFile1, nil);
     }
 
-    thresholdWidget { | ...args |
-        ^this.createThresholdWidget(*args);
+    knob { | label, key, size, automation = true |
+        ^this.createKnob(label, key, size, automation);
     }
-    createThresholdWidget { | label, key |
-        var knob = Knob()
-        .fixedSize_(50@50)
+    createKnob { | label, key, size, automation = true |
+        var knobSize = size ?? 50;
+        var newKnob = Knob()
+        .fixedSize_(knobSize@knobSize)
         .action_({
-            this.sendFeedback(key, knob.value);
-            this.actions[key].(knob.value);
+            this.sendFeedback(key, newKnob.value);
+            this.actions[key].(newKnob.value);
         });
 
-        var learnButton = this.createLearnButton(key, "Set", 75)
-        .states_([
-            ["Set velocity", Color(*this.config[\foregroundColor]), Color(*this.config[\backgroundColor])],
-            [ "Strike a key", Color(*this.config[\foregroundColor]), Color.magenta]
-        ])
-        .font_(Font(this.config[\font], this.config[\fontSize]));
+        var learnButton = this.createLearnButton(key);
+
+        var knobLabel = StaticText.new()
+            .font_(Font(this.config[\font], this.config[\fontSize]))
+            .string_(label)
+            .stringColor_(Color(*this.config[\foregroundColor]));
+
+        // Register to ignore presets if automation is disabled
+        if(automation.not) {
+            presetIgnoreKeys.add(key.asSymbol);
+        };
 
         // Keep track of this element in a dict
-        this.guiMappings.add(key -> [knob, learnButton]);
+        this.guiMappings.add(key -> [newKnob, learnButton]);
 
-        ^HLayout(
-            VLayout(
-            [StaticText()
-                .string_("Set the velocity for the alternative tones by striking a key at the desired velocity")
-                .maxWidth_(120)
-                .font_(Font(this.config[\font], this.config[\fontSize]))
-            ,\align: \center],
-            nil,
-        ),
-            VLayout(
-                [knob, \align: \center],
-                [learnButton, \align: \center],
-            ),
-            nil
+        ^VLayout(
+            HLayout(
+                newKnob,
+                [learnButton, \align: \topLeft],
+                nil
+            ).spacing_(0).margins_(0),
+            knobLabel,
         );
     }
 
     // Create a preset grid and register it
     // Returns the view to add to your layout
+    presetGrid { | key = \default, numPresets = 25, buttonSize = 30, labels |
+        ^this.createPresetGrid(key, numPresets, buttonSize, labels);
+    }
     createPresetGrid { |key = \default, numPresets = 25, buttonSize = 30, labels|
         var grid = PresetGrid(
             numPresets: numPresets,
@@ -591,6 +604,9 @@ LearnGUI {
     }
 
     // Get a registered preset grid by key
+    preset { |key = \default|
+        ^this.getPresetGrid(key);
+    }
     getPresetGrid { |key = \default|
         ^this.presetGrids[key];
     }
