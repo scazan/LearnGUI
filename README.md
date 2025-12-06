@@ -140,3 +140,66 @@ learnGUI.sendNoteFeedback(\myButton, value, noteNum: 60, chan: 0);
 ```
 
 Feedback settings are automatically saved and loaded with your other MIDI mappings.
+
+### Preset Bank
+
+LearnGUI includes a 5x5 preset bank for storing and recalling GUI states. Each slot stores all current widget values.
+
+#### Adding to Your Layout
+
+```supercollider
+learnGUI.setLayout(
+    VLayout(
+        HLayout(
+            learnGUI.slider("Freq", \freq),
+            learnGUI.slider("Pan", \pan),
+            learnGUI.slider("Amp", \amp),
+        ),
+        HLayout(
+            learnGUI.createPresetBank(),  // 5x5 grid (25 buttons) with default 30x30 size
+            nil,
+        ),
+    )
+);
+
+// Signature: createPresetBank(numButtons, buttonSize, labels)
+
+// Custom number of buttons (grid sized by square root):
+learnGUI.createPresetBank(9)        // 3x3 grid
+learnGUI.createPresetBank(16)       // 4x4 grid
+learnGUI.createPresetBank(10)       // 4x3 grid (4 cols, fills remaining)
+
+// Custom button size:
+learnGUI.createPresetBank(25, 40)   // 25 buttons at 40x40 pixels
+
+// With custom labels:
+learnGUI.createPresetBank(10, 30, ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"])
+
+// Partial labels - buttons without labels are blank:
+learnGUI.createPresetBank(8, 35, ["Init", "Warm", "Bright", "Dark"])  // last 4 are blank
+
+// Using named arguments:
+learnGUI.createPresetBank(numButtons: 9, buttonSize: 35, labels: ["Init", "Warm", "Bright"])
+```
+
+#### Usage
+
+- **Shift-click** a button to store the current values into that preset slot
+- **Click** a button to recall the stored values from that slot
+- Empty slots appear dimmed; slots with stored data show in your `activeColor`
+- Buttons are numbered 1-25
+
+#### Programmatic Access
+
+You can also access the preset data directly:
+
+```supercollider
+// Store current values to slot 0
+learnGUI.presetBank[0] = learnGUI.getValues();
+
+// Recall values from slot 0
+learnGUI.setValues(learnGUI.presetBank[0]);
+
+// Check if a slot has data
+learnGUI.presetBank[5].notNil;  // true if slot 6 has stored values
+```

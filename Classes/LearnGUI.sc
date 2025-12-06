@@ -20,6 +20,9 @@ LearnGUI {
     var <>feedbackOverrides;
     var <isProcessingMIDI = false;
 
+    // Preset Bank
+    var <>presetBank;
+
     *new { | config, actions |
         ^super.new.init(config, actions);
     }
@@ -65,6 +68,9 @@ LearnGUI {
 
         // MIDI Feedback initialization
         this.feedbackOverrides = Dictionary();
+
+        // Preset Bank initialization (25 slots for 5x5 grid)
+        this.presetBank = Array.fill(25, { nil });
 
         // START
         MIDIClient.init(verbose: false);
@@ -492,6 +498,63 @@ LearnGUI {
         );
     }
 
+    createPresetBank { |numButtons = 25, buttonSize = 30, labels|
+        var numCols = numButtons.sqrt.ceil.asInteger;
+        var numRows = (numButtons / numCols).ceil.asInteger;
+        var rows = Array.newClear(numRows);
+
+        numRows.do { |row|
+            var buttonsInRow = min(numCols, numButtons - (row * numCols));
+            var rowButtons = Array.newClear(buttonsInRow);
+            buttonsInRow.do { |col|
+                var index = (row * numCols) + col;
+                var label = if(labels.notNil && (index < labels.size)) {
+                    labels[index].asString
+                } {
+                    ""
+                };
+                var button = Button()
+                    .fixedHeight_(buttonSize)
+                    .minWidth_(buttonSize)
+                    .font_(Font(this.config[\font], (buttonSize * 0.5).max(10).asInteger))
+                    .states_([
+                        // Empty slot - dimmed appearance
+                        [label, Color(*this.config[\foregroundColor]++[0.3]), Color(*this.config[\backgroundColor])],
+                        // Has data - active appearance
+                        [label, Color(*this.config[\foregroundColor]), Color(*this.config[\activeColor])]
+                    ])
+                    .mouseDownAction_({ |view, x, y, modifiers, buttonNumber, clickCount|
+                        // Shift key modifier = 131072
+                        if(modifiers.bitAnd(131072) > 0) {
+                            // Shift-click: clear if has data, store if empty
+                            if(this.presetBank[index].notNil) {
+                                this.presetBank[index] = nil;
+                                { view.value = 0 }.defer;  // Show as "empty"
+                                ("Cleared preset " ++ (index + 1)).postln;
+                            } {
+                                this.presetBank[index] = this.getValues();
+                                { view.value = 1 }.defer;  // Show as "has data"
+                                ("Stored preset " ++ (index + 1)).postln;
+                            };
+                        } {
+                            // Regular click: recall values from this slot
+                            if(this.presetBank[index].notNil) {
+                                this.setValues(this.presetBank[index]);
+                                ("Recalled preset " ++ (index + 1)).postln;
+                            } {
+                                ("Preset " ++ (index + 1) ++ " is empty").postln;
+                            };
+                        };
+                        true  // Consume the event, prevent default button toggle
+                    });
+                rowButtons[col] = button;
+            };
+            rows[row] = HLayout(*rowButtons).spacing_(2);
+        };
+
+        ^VLayout(*rows).spacing_(2);
+    }
+
     mapKeyboardListener { | learningKey, device, name |
         var indexOfKeyboard = 0;
         var midiMenu = this.guiMappings[learningKey];
@@ -597,6 +660,16 @@ LearnGUI {
             configList.add(key);
             configList.add(override.asString);
         });
+        // Save presets
+        configList.add("presetBank");
+        configList.add(this.presetBank.size.asString);
+        this.presetBank.do({ |preset, index|
+            if(preset.notNil) {
+                configList.add(index.asString);
+                configList.add(preset.asCompileString);
+            };
+        });
+        configList.add("endPresetBank");
         ("Saving settings to: " ++ configDir ++ "/" ++ this.config[\configFileName]).postln;
         arrayToFile.(configList.asArray, configDir ++ "/" ++ this.config[\configFileName]);
     }
@@ -641,9 +714,19 @@ LearnGUI {
                                     if(file.getLine() == "feedbackOverrides", {
                                         var overrideKey;
                                         result[\feedbackOverrides] = Dictionary();
-                                        while({(overrideKey = file.getLine()).notNil()}, {
+                                        while({(overrideKey = file.getLine()).notNil() and: { overrideKey != "presetBank" }}, {
                                             var overrideVal = file.getLine();
                                             result[\feedbackOverrides][overrideKey.asSymbol] = overrideVal;
+                                        });
+                                        // Check for presetBank
+                                        if(overrideKey == "presetBank", {
+                                            var presetSize = file.getLine().asInteger;
+                                            var presetIndex;
+                                            result[\presetBank] = Array.fill(presetSize, { nil });
+                                            while({(presetIndex = file.getLine()).notNil() and: { presetIndex != "endPresetBank" }}, {
+                                                var presetData = file.getLine();
+                                                result[\presetBank][presetIndex.asInteger] = presetData.interpret;
+                                            });
                                         });
                                     });
                                 });
@@ -701,6 +784,11 @@ LearnGUI {
                 configDictionary[\feedbackOverrides].keysValuesDo({ |key, value|
                     feedbackOverrides[key.asSymbol] = value.interpret;
                 });
+            });
+
+            // Load presets
+            if(configDictionary[\presetBank].notNil(), {
+                this.presetBank = configDictionary[\presetBank];
             });
         }, {
             "No configuration present".postln;
