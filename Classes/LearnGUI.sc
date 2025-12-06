@@ -20,9 +20,9 @@ LearnGUI {
     var <>feedbackOverrides;
     var <isProcessingMIDI = false;
 
-    // Preset Bank
-    var <>presetBank;
-    var <>presetButtons;
+    // Preset Grids
+    var <>presetGrids;
+    var <>loadedPresetData;
 
     // Unsaved changes tracking
     var <>isDirty = false;
@@ -113,9 +113,9 @@ LearnGUI {
         // MIDI Feedback initialization
         this.feedbackOverrides = Dictionary();
 
-        // Preset Bank initialization (25 slots for 5x5 grid)
-        this.presetBank = Array.fill(25, { nil });
-        this.presetButtons = Array.new;
+        // Preset Grids initialization
+        this.presetGrids = Dictionary();
+        this.loadedPresetData = Dictionary();
 
         // START
         MIDIClient.init(verbose: false);
@@ -566,95 +566,33 @@ LearnGUI {
         );
     }
 
-    createPresetBank { |numButtons = 25, buttonSize = 30, labels|
-        var numCols = numButtons.sqrt.ceil.asInteger;
-        var numRows = (numButtons / numCols).ceil.asInteger;
-        var rows = Array.newClear(numRows);
+    // Create a preset grid and register it
+    // Returns the view to add to your layout
+    createPresetGrid { |key = \default, numPresets = 25, buttonSize = 30, labels|
+        var grid = PresetGrid(
+            numPresets: numPresets,
+            config: this.config,
+            getValues: { this.getValues() },
+            setValues: { |values| this.setValues(values) },
+            onChange: { this.markDirty() },
+            key: key
+        );
 
-        // Initialize presetButtons array if needed, or resize for different numButtons
-        this.presetButtons = Array.fill(numButtons, { nil });
+        // Register the grid
+        this.presetGrids[key] = grid;
 
-        // Ensure presetBank matches the requested size
-        if(this.presetBank.size != numButtons) {
-            var oldBank = this.presetBank;
-            this.presetBank = Array.fill(numButtons, { nil });
-            // Copy over existing presets that fit
-            min(oldBank.size, numButtons).do { |i|
-                this.presetBank[i] = oldBank[i];
-            };
+        // Apply any loaded preset data for this key
+        if(this.loadedPresetData[key].notNil) {
+            grid.setData(this.loadedPresetData[key]);
+            this.loadedPresetData[key] = nil;  // Clear temporary storage
         };
 
-        numRows.do { |row|
-            var buttonsInRow = min(numCols, numButtons - (row * numCols));
-            var rowButtons = Array.newClear(buttonsInRow);
-            buttonsInRow.do { |col|
-                var index = (row * numCols) + col;
-                var label = if(labels.notNil && (index < labels.size)) {
-                    labels[index].asString
-                } {
-                    ""
-                };
-                var button = Button()
-                    .fixedHeight_(buttonSize)
-                    .minWidth_(buttonSize)
-                    .font_(Font(this.config[\font], (buttonSize * 0.5).max(10).asInteger))
-                    .states_([
-                        // Empty slot - dimmed appearance
-                        [label, Color(*this.config[\foregroundColor]++[0.3]), Color(*this.config[\backgroundColor])],
-                        // Has data - active appearance
-                        [label, Color(*this.config[\foregroundColor]), Color(*this.config[\activeColor])]
-                    ])
-                    .mouseDownAction_({ |view, x, y, modifiers, buttonNumber, clickCount|
-                        // Shift key modifier = 131072
-                        if(modifiers.bitAnd(131072) > 0) {
-                            // Shift-click: clear if has data, store if empty
-                            if(this.presetBank[index].notNil) {
-                                this.presetBank[index] = nil;
-                                { view.value = 0 }.defer;  // Show as "empty"
-                                ("Cleared preset " ++ (index + 1)).postln;
-                            } {
-                                this.presetBank[index] = this.getValues();
-                                { view.value = 1 }.defer;  // Show as "has data"
-                                ("Stored preset " ++ (index + 1)).postln;
-                            };
-                            this.markDirty();
-                        } {
-                            // Regular click: recall values from this slot
-                            if(this.presetBank[index].notNil) {
-                                this.setValues(this.presetBank[index]);
-                                ("Recalled preset " ++ (index + 1)).postln;
-                            } {
-                                ("Preset " ++ (index + 1) ++ " is empty").postln;
-                            };
-                        };
-                        true  // Consume the event, prevent default button toggle
-                    });
-                // Store button reference for later UI updates
-                this.presetButtons[index] = button;
-                rowButtons[col] = button;
-            };
-            rows[row] = HLayout(*rowButtons).spacing_(2);
-        };
-
-        // Update button states based on loaded presets
-        this.updatePresetBankUI();
-
-        ^VLayout(*rows).spacing_(2);
+        ^grid.createView(buttonSize, labels);
     }
 
-    // Update preset button visual states based on presetBank data
-    updatePresetBankUI {
-        this.presetButtons.do { |button, index|
-            if(button.notNil) {
-                {
-                    if(this.presetBank[index].notNil) {
-                        button.value = 1;  // Show as "has data"
-                    } {
-                        button.value = 0;  // Show as "empty"
-                    };
-                }.defer;
-            };
-        };
+    // Get a registered preset grid by key
+    getPresetGrid { |key = \default|
+        ^this.presetGrids[key];
     }
 
     mapKeyboardListener { | learningKey, device, name |
@@ -765,16 +703,18 @@ LearnGUI {
             configList.add(key);
             configList.add(override.asString);
         });
-        // Save presets
-        configList.add("presetBank");
-        configList.add(this.presetBank.size.asString);
-        this.presetBank.do({ |preset, index|
-            if(preset.notNil) {
-                configList.add(index.asString);
-                configList.add(preset.asCompileString);
-            };
+        // Save preset grids
+        this.presetGrids.keysValuesDo({ |gridKey, grid|
+            configList.add("presetGrid:" ++ gridKey.asString);
+            configList.add(grid.numPresets.asString);
+            grid.presets.do({ |preset, index|
+                if(preset.notNil) {
+                    configList.add(index.asString);
+                    configList.add(preset.asCompileString);
+                };
+            });
+            configList.add("endPresetGrid:" ++ gridKey.asString);
         });
-        configList.add("endPresetBank");
         ("Saving settings to: " ++ configDir ++ "/" ++ this.config[\configFileName]).postln;
         arrayToFile.(configList.asArray, configDir ++ "/" ++ this.config[\configFileName]);
     }
@@ -819,19 +759,35 @@ LearnGUI {
                                     if(file.getLine() == "feedbackOverrides", {
                                         var overrideKey;
                                         result[\feedbackOverrides] = Dictionary();
-                                        while({(overrideKey = file.getLine()).notNil() and: { overrideKey != "presetBank" }}, {
+                                        result[\presetGrids] = Dictionary();
+                                        while({(overrideKey = file.getLine()).notNil() and: { overrideKey.beginsWith("presetGrid").not and: { overrideKey.beginsWith("presetBank").not } }}, {
                                             var overrideVal = file.getLine();
                                             result[\feedbackOverrides][overrideKey.asSymbol] = overrideVal;
                                         });
-                                        // Check for presetBank
-                                        if(overrideKey == "presetBank", {
+                                        // Parse preset grids (old format: "presetBank", new format: "presetGrid:keyName")
+                                        while({overrideKey.notNil() and: { overrideKey.beginsWith("presetGrid") or: { overrideKey.beginsWith("presetBank") } }}, {
+                                            var gridKey = if(overrideKey.contains(":")) {
+                                                overrideKey.split($:)[1].asSymbol;
+                                            } { \default };
                                             var presetSize = file.getLine().asInteger;
                                             var presetIndex;
-                                            result[\presetBank] = Array.fill(presetSize, { nil });
-                                            while({(presetIndex = file.getLine()).notNil() and: { presetIndex != "endPresetBank" }}, {
+                                            var endMarker = if(overrideKey.contains(":")) {
+                                                if(overrideKey.beginsWith("presetGrid")) {
+                                                    "endPresetGrid:" ++ gridKey.asString;
+                                                } {
+                                                    "endPresetBank:" ++ gridKey.asString;
+                                                };
+                                            } { "endPresetBank" };
+                                            var presetArray = Array.fill(presetSize, { nil });
+
+                                            while({(presetIndex = file.getLine()).notNil() and: { presetIndex != endMarker }}, {
                                                 var presetData = file.getLine();
-                                                result[\presetBank][presetIndex.asInteger] = presetData.interpret;
+                                                presetArray[presetIndex.asInteger] = presetData.interpret;
                                             });
+                                            result[\presetGrids][gridKey] = presetArray;
+
+                                            // Check if there's another preset grid
+                                            overrideKey = file.getLine();
                                         });
                                     });
                                 });
@@ -894,9 +850,16 @@ LearnGUI {
                 });
             });
 
-            // Load presets
-            if(configDictionary[\presetBank].notNil(), {
-                this.presetBank = configDictionary[\presetBank];
+            // Load preset grids into temporary storage
+            // They will be applied when preset grids are created
+            if(configDictionary[\presetGrids].notNil(), {
+                configDictionary[\presetGrids].keysValuesDo({ |gridKey, presetData|
+                    this.loadedPresetData[gridKey] = presetData;
+                    // If the grid already exists, apply the data immediately
+                    if(this.presetGrids[gridKey].notNil) {
+                        this.presetGrids[gridKey].setData(presetData);
+                    };
+                });
             });
 
             // Done loading
