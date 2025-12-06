@@ -671,194 +671,75 @@ LearnGUI {
     }
 
     saveSettings {
-        var arrayToFile = {| array, path |
-            var file;
-            file = File.new(path.standardizePath, "w");
-            array.size.do{|i| file.write(array[i].value.asString ++ "\n"); };
-            file.close;
-            this.markClean();
-            "SAVED".postln;
-        };
-        var configList = List.newUsing(this.config.getPairs);
+        var settingsFilePath = configDir ++ "/" ++ this.config[\configFileName];
+        var presetGridData = Dictionary();
+        var settings;
 
-        configList.add("keyboardMappings");
-        this.keyboardMappings.keysValuesDo({ |key, map|
-            configList.add(key);
-            configList.add(map[0]);
-            configList.add(map[1]);
-        });
-        configList.add("ccMappings");
-        this.ccMappings.getPairs.do({ |map|
-            configList.add(map);
-        });
-        configList.add("noteMappings");
-        this.noteMappings.getPairs.do({ |map|
-            configList.add(map);
-        });
-        // Save feedback settings
-        configList.add("feedbackEnabled");
-        configList.add(feedbackEnabled.asString);
-        configList.add("feedbackOverrides");
-        this.feedbackOverrides.keysValuesDo({ |key, override|
-            configList.add(key);
-            configList.add(override.asString);
-        });
-        // Save preset grids
+        // Extract preset data from grids
         this.presetGrids.keysValuesDo({ |gridKey, grid|
-            configList.add("presetGrid:" ++ gridKey.asString);
-            configList.add(grid.numPresets.asString);
-            grid.presets.do({ |preset, index|
-                if(preset.notNil) {
-                    configList.add(index.asString);
-                    configList.add(preset.asCompileString);
-                };
-            });
-            configList.add("endPresetGrid:" ++ gridKey.asString);
+            presetGridData[gridKey] = grid.getData();
         });
-        ("Saving settings to: " ++ configDir ++ "/" ++ this.config[\configFileName]).postln;
-        arrayToFile.(configList.asArray, configDir ++ "/" ++ this.config[\configFileName]);
+
+        // Build settings dictionary
+        settings = (
+            ccMappings: this.ccMappings,
+            noteMappings: this.noteMappings,
+            keyboardMappings: this.keyboardMappings,
+            feedbackEnabled: feedbackEnabled,
+            feedbackOverrides: this.feedbackOverrides,
+            presetGrids: presetGridData
+        );
+
+        settings.writeArchive(settingsFilePath.standardizePath);
+        this.markClean();
+        ("Saved settings to: " ++ settingsFilePath).postln;
     }
 
     loadSettings {
         var settingsFilePath = configDir ++ "/" ++ this.config[\configFileName];
-        var fileToDictionary = {| path |
-            var file, fileValues, t, array, lineNumber=0;
-            var result = Dictionary();
-            file = File.new(path.standardizePath, "r");
 
-            while({ (t = file.getLine).notNil},{
-                var key, value;
-                key = t;
-                // At the end of the file, we specify keyboard and cc mappings
-                if(key == "keyboardMappings", {
-                    var keyboardKey;
-                    result[\keyboardMappings] = Dictionary();
-                    while({(keyboardKey = file.getLine()).notNil()}, {
-                        var keyboardDevice, keyboardDeviceName;
-
-                        if(keyboardKey == "ccMappings", {
-                            var ccKey;
-                            result[\ccMappings] = Dictionary();
-                            while({(ccKey = file.getLine()).notNil() and: { ccKey != "noteMappings" }}, {
-                                var ccVal = file.getLine();
-
-                                result[\ccMappings][ccKey.asSymbol] = ccVal.interpret;
-                            });
-                            // Parse noteMappings if we hit it
-                            if(ccKey == "noteMappings", {
-                                var noteKey;
-                                result[\noteMappings] = Dictionary();
-                                while({(noteKey = file.getLine()).notNil() and: { noteKey != "feedbackEnabled" }}, {
-                                    var noteVal = file.getLine();
-                                    result[\noteMappings][noteKey.asSymbol] = noteVal.interpret;
-                                });
-                                // Parse feedbackEnabled if we hit it
-                                if(noteKey == "feedbackEnabled", {
-                                    result[\feedbackEnabled] = file.getLine();
-                                    // Check for feedbackOverrides
-                                    if(file.getLine() == "feedbackOverrides", {
-                                        var overrideKey;
-                                        result[\feedbackOverrides] = Dictionary();
-                                        result[\presetGrids] = Dictionary();
-                                        while({(overrideKey = file.getLine()).notNil() and: { overrideKey.beginsWith("presetGrid").not and: { overrideKey.beginsWith("presetBank").not } }}, {
-                                            var overrideVal = file.getLine();
-                                            result[\feedbackOverrides][overrideKey.asSymbol] = overrideVal;
-                                        });
-                                        // Parse preset grids (old format: "presetBank", new format: "presetGrid:keyName")
-                                        while({overrideKey.notNil() and: { overrideKey.beginsWith("presetGrid") or: { overrideKey.beginsWith("presetBank") } }}, {
-                                            var gridKey = if(overrideKey.contains(":")) {
-                                                overrideKey.split($:)[1].asSymbol;
-                                            } { \default };
-                                            var presetSize = file.getLine().asInteger;
-                                            var presetIndex;
-                                            var endMarker = if(overrideKey.contains(":")) {
-                                                if(overrideKey.beginsWith("presetGrid")) {
-                                                    "endPresetGrid:" ++ gridKey.asString;
-                                                } {
-                                                    "endPresetBank:" ++ gridKey.asString;
-                                                };
-                                            } { "endPresetBank" };
-                                            var presetArray = Array.fill(presetSize, { nil });
-
-                                            while({(presetIndex = file.getLine()).notNil() and: { presetIndex != endMarker }}, {
-                                                var presetData = file.getLine();
-                                                presetArray[presetIndex.asInteger] = presetData.interpret;
-                                            });
-                                            result[\presetGrids][gridKey] = presetArray;
-
-                                            // Check if there's another preset grid
-                                            overrideKey = file.getLine();
-                                        });
-                                    });
-                                });
-                            });
-                        }, {
-                            keyboardDevice = file.getLine();
-                            keyboardDeviceName = file.getLine();
-
-                            result[\keyboardMappings][keyboardKey.asSymbol] = [keyboardDevice, keyboardDeviceName];
-                        });
-                    });
-
-                }, {
-                    value = file.getLine();
-                    result[key.asSymbol] = value;
-                });
-            });
-
-            file.close;
-
-            result;
-        };
         if(File.exists(settingsFilePath.standardizePath), {
-            var configDictionary = fileToDictionary.(settingsFilePath);
+            var settings = Object.readArchive(settingsFilePath.standardizePath);
 
             // Suppress dirty marking during load
             isLoading = true;
 
-            if(configDictionary[\ccMappings].notNil(), {
-                configDictionary[\ccMappings].keysValuesDo({ | key, value |
+            if(settings[\ccMappings].notNil, {
+                settings[\ccMappings].keysValuesDo({ |key, value|
                     this.mapCCListener(key.asSymbol, *value);
                 });
             });
 
-            if(configDictionary[\noteMappings].notNil(), {
-                configDictionary[\noteMappings].keysValuesDo({ | key, value |
+            if(settings[\noteMappings].notNil, {
+                settings[\noteMappings].keysValuesDo({ |key, value|
                     this.mapNoteListener(key.asSymbol, *value);
                 });
             });
 
-            if(configDictionary[\keyboardMappings].notNil(), {
-                this.keyboardMappings = configDictionary[\keyboardMappings];
-                configDictionary[\keyboardMappings].keysValuesDo({ | key, value |
+            if(settings[\keyboardMappings].notNil, {
+                this.keyboardMappings = settings[\keyboardMappings];
+                settings[\keyboardMappings].keysValuesDo({ |key, value|
                     this.mapKeyboardListener(key.asSymbol, *value);
                 });
             });
 
-            if(configDictionary[\sampleFilePath].notNil(), {
-                this.loadSample(configDictionary[\sampleFilePath]);
+            if(settings[\feedbackEnabled].notNil, {
+                feedbackEnabled = settings[\feedbackEnabled];
             });
 
-            // Load feedback settings
-            if(configDictionary[\feedbackEnabled].notNil(), {
-                feedbackEnabled = configDictionary[\feedbackEnabled].interpret;
-            });
-
-            if(configDictionary[\feedbackOverrides].notNil(), {
-                configDictionary[\feedbackOverrides].keysValuesDo({ |key, value|
-                    feedbackOverrides[key.asSymbol] = value.interpret;
-                });
+            if(settings[\feedbackOverrides].notNil, {
+                feedbackOverrides = settings[\feedbackOverrides];
             });
 
             // Load preset grids into temporary storage
             // They will be applied when preset grids are created
-            if(configDictionary[\presetGrids].notNil(), {
-                configDictionary[\presetGrids].keysValuesDo({ |gridKey, presetData|
+            if(settings[\presetGrids].notNil, {
+                settings[\presetGrids].keysValuesDo({ |gridKey, presetData|
                     this.loadedPresetData[gridKey] = presetData;
                     // If the grid already exists, apply the data immediately
-                    if(this.presetGrids[gridKey].notNil) {
+                    if(this.presetGrids[gridKey].notNil, {
                         this.presetGrids[gridKey].setData(presetData);
-                    };
+                    });
                 });
             });
 
@@ -867,7 +748,6 @@ LearnGUI {
         }, {
             "No configuration present".postln;
         });
-
     }
 
 }
