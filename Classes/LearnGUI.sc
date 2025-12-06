@@ -244,10 +244,13 @@ LearnGUI {
         ^values;
     }
 
-    // Set all widget values from a Dictionary
+    // Set all widget values from a Dictionary (skips buttons to avoid triggering actions)
     setValues { |values|
         values.keysValuesDo { |key, value|
-            this.setValue(key, value);
+            var guiArray = guiMappings[key.asSymbol];
+            if(guiArray.notNil && (guiArray[0].class != Button)) {
+                this.setValue(key, value);
+            };
         };
     }
 
