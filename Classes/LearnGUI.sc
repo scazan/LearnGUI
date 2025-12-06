@@ -22,6 +22,7 @@ LearnGUI {
 
     // Preset Bank
     var <>presetBank;
+    var <>presetButtons;
 
     *new { | config, actions |
         ^super.new.init(config, actions);
@@ -71,6 +72,7 @@ LearnGUI {
 
         // Preset Bank initialization (25 slots for 5x5 grid)
         this.presetBank = Array.fill(25, { nil });
+        this.presetButtons = Array.new;
 
         // START
         MIDIClient.init(verbose: false);
@@ -506,6 +508,19 @@ LearnGUI {
         var numRows = (numButtons / numCols).ceil.asInteger;
         var rows = Array.newClear(numRows);
 
+        // Initialize presetButtons array if needed, or resize for different numButtons
+        this.presetButtons = Array.fill(numButtons, { nil });
+
+        // Ensure presetBank matches the requested size
+        if(this.presetBank.size != numButtons) {
+            var oldBank = this.presetBank;
+            this.presetBank = Array.fill(numButtons, { nil });
+            // Copy over existing presets that fit
+            min(oldBank.size, numButtons).do { |i|
+                this.presetBank[i] = oldBank[i];
+            };
+        };
+
         numRows.do { |row|
             var buttonsInRow = min(numCols, numButtons - (row * numCols));
             var rowButtons = Array.newClear(buttonsInRow);
@@ -550,12 +565,32 @@ LearnGUI {
                         };
                         true  // Consume the event, prevent default button toggle
                     });
+                // Store button reference for later UI updates
+                this.presetButtons[index] = button;
                 rowButtons[col] = button;
             };
             rows[row] = HLayout(*rowButtons).spacing_(2);
         };
 
+        // Update button states based on loaded presets
+        this.updatePresetBankUI();
+
         ^VLayout(*rows).spacing_(2);
+    }
+
+    // Update preset button visual states based on presetBank data
+    updatePresetBankUI {
+        this.presetButtons.do { |button, index|
+            if(button.notNil) {
+                {
+                    if(this.presetBank[index].notNil) {
+                        button.value = 1;  // Show as "has data"
+                    } {
+                        button.value = 0;  // Show as "empty"
+                    };
+                }.defer;
+            };
+        };
     }
 
     mapKeyboardListener { | learningKey, device, name |
