@@ -23,6 +23,7 @@ LearnGUI {
     // Preset Grids
     var <>presetGrids;
     var <>loadedPresetData;
+    var <>loadedPresetMidiMappings;
 
     // Unsaved changes tracking
     var <>isDirty = false;
@@ -119,6 +120,7 @@ LearnGUI {
         // Preset Grids initialization
         this.presetGrids = Dictionary();
         this.loadedPresetData = Dictionary();
+        this.loadedPresetMidiMappings = Dictionary();
         this.presetIgnoreKeys = Set();
 
         // START
@@ -591,6 +593,8 @@ LearnGUI {
             onChange: { this.markDirty() },
             key: key
         );
+        var learnButton = grid.createLearnButton(18);
+        var gridView = grid.createView(buttonSize, labels);
 
         // Register the grid
         this.presetGrids[key] = grid;
@@ -601,7 +605,17 @@ LearnGUI {
             this.loadedPresetData[key] = nil;  // Clear temporary storage
         };
 
-        ^grid.createView(buttonSize, labels);
+        // Apply any loaded MIDI mappings for this key
+        if(this.loadedPresetMidiMappings[key].notNil) {
+            this.applyPresetMidiMappings(key, this.loadedPresetMidiMappings[key]);
+            this.loadedPresetMidiMappings[key] = nil;  // Clear temporary storage
+        };
+
+        ^HLayout(
+            gridView,
+            [learnButton, \align: \topLeft],
+            nil
+        ).spacing_(2).margins_(0);
     }
 
     // Get a registered preset grid by key
@@ -652,21 +666,39 @@ LearnGUI {
     setupMIDILearn {
         MIDIdef.freeAll;
         MIDIdef.cc(\ccLearn, { | val, num, chan, src |
-            if(this.currentLearningKey.notNil() && (this.currentLearningKey != \thresh), {
-                var learningKey = this.currentLearningKey.asString();
-                {this.guiMappings.at(learningKey.asSymbol)[1].valueAction = 0;}.defer;
-                this.currentLearningKey = nil;
-                this.mapCCListener(learningKey, num, chan, src);
-            });
+            // Check for preset grid learning first
+            var presetGridLearning = this.findLearningPresetGrid();
+            if(presetGridLearning.notNil) {
+                var grid = presetGridLearning;
+                var index = grid.learningIndex;
+                grid.finishLearning(num, chan, src, \cc);
+                this.mapPresetCCListener(grid.key, index, num, chan, src);
+            } {
+                if(this.currentLearningKey.notNil() && (this.currentLearningKey != \thresh), {
+                    var learningKey = this.currentLearningKey.asString();
+                    {this.guiMappings.at(learningKey.asSymbol)[1].valueAction = 0;}.defer;
+                    this.currentLearningKey = nil;
+                    this.mapCCListener(learningKey, num, chan, src);
+                });
+            };
         });
 
         MIDIdef.noteOn(\noteOnLearn, { | value, num, chan, src |
-            if(this.currentLearningKey.notNil() && (this.currentLearningKey != \thresh), {
-                var learningKey = this.currentLearningKey.asString();
-                {this.guiMappings.at(learningKey.asSymbol)[1].valueAction = 0;}.defer;
-                this.currentLearningKey = nil;
-                this.mapNoteListener(learningKey, num, chan, src);
-            });
+            // Check for preset grid learning first
+            var presetGridLearning = this.findLearningPresetGrid();
+            if(presetGridLearning.notNil) {
+                var grid = presetGridLearning;
+                var index = grid.learningIndex;
+                grid.finishLearning(num, chan, src, \noteOn);
+                this.mapPresetNoteListener(grid.key, index, num, chan, src);
+            } {
+                if(this.currentLearningKey.notNil() && (this.currentLearningKey != \thresh), {
+                    var learningKey = this.currentLearningKey.asString();
+                    {this.guiMappings.at(learningKey.asSymbol)[1].valueAction = 0;}.defer;
+                    this.currentLearningKey = nil;
+                    this.mapNoteListener(learningKey, num, chan, src);
+                });
+            };
         });
         MIDIdef.noteOn(\threshLearn, { | velocity, num, chan, src |
             if(this.currentLearningKey == \thresh, {
@@ -687,14 +719,78 @@ LearnGUI {
         });
     }
 
+    // Find any preset grid that is currently in learning mode
+    findLearningPresetGrid {
+        this.presetGrids.keysValuesDo({ |gridKey, grid|
+            if(grid.isLearning) {
+                ^grid;
+            };
+        });
+        ^nil;
+    }
+
+    // Create MIDIdef for a preset CC mapping
+    mapPresetCCListener { |gridKey, presetIndex, num, chan, src|
+        var defKey = ("preset_" ++ gridKey ++ "_" ++ presetIndex ++ "_cc").asSymbol;
+        MIDIdef.cc(defKey, { |val|
+            // Trigger recall on any CC value > 0 (button press)
+            if(val > 0) {
+                {
+                    var grid = this.presetGrids[gridKey];
+                    if(grid.notNil) {
+                        grid.recall(presetIndex);
+                    };
+                }.defer;
+            };
+        }, num, chan, src);
+    }
+
+    // Create MIDIdef for a preset note mapping
+    mapPresetNoteListener { |gridKey, presetIndex, num, chan, src|
+        var defKey = ("preset_" ++ gridKey ++ "_" ++ presetIndex ++ "_note").asSymbol;
+        MIDIdef.noteOn(defKey, { |val|
+            {
+                var grid = this.presetGrids[gridKey];
+                if(grid.notNil) {
+                    grid.recall(presetIndex);
+                };
+            }.defer;
+        }, num, chan, src);
+    }
+
+    // Apply saved MIDI mappings to a preset grid
+    applyPresetMidiMappings { |gridKey, midiMappings|
+        var grid = this.presetGrids[gridKey];
+        if(grid.notNil && midiMappings.notNil) {
+            // Store mappings in the grid
+            grid.setMidiMappings(midiMappings);
+            // Create MIDIdefs for each mapping
+            midiMappings.keysValuesDo({ |presetIndex, mapping|
+                if(mapping.notNil) {
+                    var num = mapping[0];
+                    var chan = mapping[1];
+                    var src = mapping[2];
+                    var type = mapping[3] ?? \noteOn;
+                    if(type == \cc) {
+                        this.mapPresetCCListener(gridKey, presetIndex, num, chan, src);
+                    } {
+                        this.mapPresetNoteListener(gridKey, presetIndex, num, chan, src);
+                    };
+                };
+            });
+        };
+    }
+
     saveSettings {
         var settingsFilePath = configDir ++ "/" ++ this.config[\configFileName];
         var presetGridData = Dictionary();
+        var presetMidiMappings = Dictionary();
         var settings;
 
-        // Extract preset data from grids
+        // Extract preset data and MIDI mappings from grids
         this.presetGrids.keysValuesDo({ |gridKey, grid|
             presetGridData[gridKey] = grid.getData();
+            presetMidiMappings[gridKey] = grid.getMidiMappings();
         });
 
         // Build settings dictionary
@@ -704,7 +800,8 @@ LearnGUI {
             keyboardMappings: this.keyboardMappings,
             feedbackEnabled: feedbackEnabled,
             feedbackOverrides: this.feedbackOverrides,
-            presetGrids: presetGridData
+            presetGrids: presetGridData,
+            presetMidiMappings: presetMidiMappings
         );
 
         settings.writeArchive(settingsFilePath.standardizePath);
@@ -756,6 +853,18 @@ LearnGUI {
                     // If the grid already exists, apply the data immediately
                     if(this.presetGrids[gridKey].notNil, {
                         this.presetGrids[gridKey].setData(presetData);
+                    });
+                });
+            });
+
+            // Load preset MIDI mappings into temporary storage
+            // They will be applied when preset grids are created
+            if(settings[\presetMidiMappings].notNil, {
+                settings[\presetMidiMappings].keysValuesDo({ |gridKey, midiMappings|
+                    this.loadedPresetMidiMappings[gridKey] = midiMappings;
+                    // If the grid already exists, apply the mappings immediately
+                    if(this.presetGrids[gridKey].notNil, {
+                        this.applyPresetMidiMappings(gridKey, midiMappings);
                     });
                 });
             });
